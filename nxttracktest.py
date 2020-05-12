@@ -1,14 +1,35 @@
 from threading import Thread
+import cv2
+import math
 from time import sleep
-import cv2, math
+import nxt
+import bluetooth
+import nxt.bluesock
+import nxt.usbsock
 
-FPS = 24
-
+global motorX, motorY
+FPS = 5
+#setting up the nxt and the cascade classifiers
 try:
     face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
     eye_cascade = cv2.CascadeClassifier('haarcascade_eye.xml')
+
+    print("Attempting to connect to NXT...")
+    b = nxt.bluesock.BlueSock('00:16:53:11:58:AB').connect()
+    #b = nxt.usbsock.find_bricks(name="Dan's NXT")
+    print("Connected!")
+    print("Initializing motors...")
+    motorX = nxt.Motor(b, nxt.PORT_A)
+    motorY = nxt.Motor(b, nxt.PORT_B)
+    print("Testing motors...")
+    #motorX.run(50) #nunber from -100 to 100
+    #motorY.run(50) 
+    motorX.brake()
+    motorY.brake()
+
 except:
-    print("Cannot open Haar cascade files")
+    print("Something went wrong")    
+    quit()
 
 class VideoStreamWidget(object):
     wScreen = 0 
@@ -18,6 +39,11 @@ class VideoStreamWidget(object):
     lastKnown = ''
     face_present = False
     eyes_present = False
+
+    turnX = 0
+    turnY = 0
+    multiplier = 50
+
     def __init__(self, src=0):
         # Create a VideoCapture object
         self.capture = cv2.VideoCapture(src)
@@ -29,6 +55,9 @@ class VideoStreamWidget(object):
         self.thread = Thread(target=self.update, args=())
         self.thread.daemon = True
         self.thread.start()
+        #self.motor_thread = Thread(target =self.send_control, args=())
+        #self.motor_thread.daemon = True
+        #self.motor_thread.start()
 
     def update(self):
         # Read the next frame from the stream in a different thread
@@ -37,7 +66,6 @@ class VideoStreamWidget(object):
                 (self.status, self.frame) = self.capture.read()
 
     def calculate_frame(self):
-        
         # Display frames in main program
         if self.status:
             gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
@@ -76,9 +104,10 @@ class VideoStreamWidget(object):
                         yPos = int((h/2)+y)
                         lastxPos = xPos
                         lastyPos = yPos
+
                     
                     # dist calculates a vector in a c format of a graph
-                    dist = [lastxPos - self.wScreen, self.hScreen -lastyPos]
+                    dist = [lastxPos-self.wScreen, self.hScreen-lastyPos ]
                     norm = math.sqrt(dist[0] ** 2 + dist[1] ** 2)
                     direction = [dist[0] / norm, dist[1] / norm]
                     bullet_vector = [direction[0] * math.sqrt(2), direction[1] * math.sqrt(2)]
@@ -87,6 +116,17 @@ class VideoStreamWidget(object):
                     font = cv2.FONT_HERSHEY_PLAIN
                     text = cv2.putText(gray, str(dist),(0,50), font, 1, (255,255,255), 2, cv2.LINE_AA)
 
+                    #self.turnX = int((dist[0])/10) #* self.multiplier
+                    #self.turnY = int((dist[1])/10) #* self.multiplier
+                    self.turnX = dist[0]
+                    self.turnY = dist[1]
+                    print(self.turnX, self.turnY)
+                    #self.send_control()
+                    #if self.turnX != 0 and self.turnY != 0:
+                    #    motorX.turn(100,30, False, 1, True) if self.turnX > 0 else motorX.turn(-100,45, False, 1, True)
+                    #    motorY.turn(100,30, False, 1, True) if self.turnX > 0 else motorY.turn(-100,45, False, 1, True)
+
+
                 except:
                     print("no work")
             else:
@@ -94,23 +134,41 @@ class VideoStreamWidget(object):
 
             cv2.imshow('IP Camera Video Streaming', gray)
 
+
+    def send_control(self):
+        if self.turnX == 0 or self.turnY == 0:
+            pass
+        else:
+            motorX.turn(70,50, False, 0, True) if self.turnX > 0 else motorX.turn(-70,50, False, 0, True)
+            motorY.turn(70,50, False, 0, True) if self.turnY > 0 else motorY.turn(-70,50, False, 0, True)
+        #print(self.turnX, self.turnY)
+
+
         # Press Q on keyboard to stop recording
         key = cv2.waitKey(1)
         if key == ord('q'):
+            motorX.idle()
+            motorY.idle()
             self.capture.release()
             cv2.destroyAllWindows()
-            exit(1)
+            quit()
+
 
 if __name__ == '__main__':
-    #stream_link = 'http://10.232.127.140:8080/video'q
-    stream_link = 0
-    video_stream_widget = VideoStreamWidget(stream_link)
+    stream_link = 'http://10.232.127.140:8080/video'
+    #stream_link = 0
+    tracking = VideoStreamWidget(stream_link)
+    print("Attempting to connect to stream.")
     while True:
         try:
-            video_stream_widget.calculate_frame()
-            sleep(1/FPS)
+            tracking.calculate_frame()
+            #tracking.send_control()
+            motorX.turn(70,50, False, 0, True) if VideoStreamWidget.turnX > 0 else motorX.turn(-70,50, False, 0, True)
+            motorY.turn(70,50, False, 0, True) if VideoStreamWidget.turnY > 0 else motorY.turn(-70,50, False, 0, True)
+            #sleep(1/FPS)
+
         except AttributeError:
-            print("error")
+            print("Error connecting.")
 
 
 # add in that face will only be detected if the eyes are present. without eyes, face detection is cancelled
